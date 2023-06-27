@@ -420,7 +420,8 @@ char const *Debugger_size_types[Num_debugger_size_types] = {
 	"S8",
 	"S16",
 	"S24",
-	"S32"
+	"S32",
+	"F40"
 };
 
 static watch_address_list Watchlist;

@@ -7,6 +7,7 @@
 #include <nfd.h>
 #include <string>
 #include <vector>
+#include <cinttypes>
 
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_sdl2.h"
@@ -1867,6 +1868,42 @@ static void draw_breakpoints()
 	ImGui::EndGroup();
 }
 
+// Template specialization for 40 bit floats
+template <>
+bool ImGui::InputHex<uint64_t, 40>(int id, uint64_t &value)
+{
+	constexpr const size_t ARRAY_SIZE = 40 / 4 + 1;
+
+	char str[ARRAY_SIZE];
+	sprintf(str, "%010" PRIX64, (value & ((1ULL << 40) - 1)));
+	PushID(id);
+	PushItemWidth(ARRAY_SIZE * 7 + 2);
+	bool result = InputText("", str, ARRAY_SIZE, hex_flags);
+	PopItemWidth();
+	PopID();
+	if (result) {
+		value = (uint64_t)parse<40>(str);
+	}
+	return result;
+}
+
+union cbmtype {
+	uint32_t u;
+	uint64_t u64;
+	uint8_t  b[8];
+	double   d;
+};
+
+static void cbm_float_to_double(cbmtype &value)
+{
+	// Convert 40 bit float to double
+	float    exponent = (static_cast<float>(value.u64>>32) - 0x80) - 32;
+	float    f40_sign = value.u64 & 0x80000000 ? -1.f : 1.f;
+	uint32_t mantissa = static_cast<uint32_t>(value.u64 & 0x7fffffff) + 0x80000000U;
+
+	value.d = f40_sign * std::pow(2.0, exponent) * mantissa;
+}
+
 static void draw_watch_list()
 {
 	ImGui::BeginGroup();
@@ -1931,14 +1968,12 @@ static void draw_watch_list()
 					}
 
 					ImGui::TableNextColumn();
-					const uint8_t type_size = (size & 3) + 1;
+					const uint8_t type_size = size == DEBUGGER_SIZE_TYPE_F40 ? 5 : (size & 3) + 1;
 					const bool    is_signed = (size & 4);
-					union {
-						uint32_t u;
-						uint8_t  b[4];
-					} value;
 
-					value.u = 0;
+					cbmtype value;
+
+					value.u64 = 0;
 					{
 						uint8_t i = 0;
 						for (; i < type_size; ++i) {
@@ -1948,6 +1983,14 @@ static void draw_watch_list()
 							for (; i < 4; ++i) {
 								value.b[i] = 0xff;
 							}
+						}
+						if (type_size == 5) {
+							// F40 has to be read big-endian
+							value.u64 = (static_cast<uint64_t>(value.b[0]) << 32) |
+										(value.b[1] << 24) |
+										(value.b[2] << 16) |
+										(value.b[3] << 8) |
+										(value.b[4]);
 						}
 					}
 
@@ -1966,11 +2009,20 @@ static void draw_watch_list()
 							case 4:
 								edited = ImGui::InputHex<uint32_t, 32>(1, value.u);
 								break;
+							case 5:
+								edited = ImGui::InputHex<uint64_t, 40>(1, value.u64);
+								break;
 						}
 					} else if (is_signed) {
 						ImGui::PushItemWidth(88.0f);
 						edited = ImGui::InputScalar("", ImGuiDataType_S32, &value.u, 0, 0, "%d");
 						ImGui::PopItemWidth();
+					} else if (type_size == 5) {
+						cbm_float_to_double(value);
+						ImGui::PushItemWidth(88.0f);
+						edited = ImGui::InputDouble("", &value.d, 0, 0, "%8f");
+						ImGui::PopItemWidth();
+
 					} else {
 						ImGui::PushItemWidth(88.0f);
 						edited = ImGui::InputScalar("", ImGuiDataType_U32, &value.u, 0, 0, "%u");
@@ -1978,6 +2030,7 @@ static void draw_watch_list()
 					}
 
 					if (edited) {
+						// TODO: Convert double back to F40 if type_size is 5
 						for (uint8_t i = 0; i < type_size; ++i) {
 							debug_write6502(address + i, bank, value.b[i]);
 						}

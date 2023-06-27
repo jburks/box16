@@ -61,8 +61,9 @@ using watch_address_list = std::set<watch_address_type>;
 #	define DEBUGGER_SIZE_TYPE_S16 5
 #	define DEBUGGER_SIZE_TYPE_S24 6
 #	define DEBUGGER_SIZE_TYPE_S32 7
+#   define DEBUGGER_SIZE_TYPE_F40 8
 
-constexpr const uint8_t Num_debugger_size_types = 8;
+constexpr const uint8_t Num_debugger_size_types = 9;
 extern char const      *Debugger_size_types[Num_debugger_size_types];
 
 void debugger_add_watch(uint16_t address, uint8_t bank, uint8_t size);
